@@ -1,0 +1,20 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local configuration
+.env
+
+# OS clutter
+.DS_Store
+Thumbs.db
+
+# Output artifacts
+output.mp4
+

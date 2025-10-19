@@ -1,0 +1,26 @@
+Metadata-Version: 2.4
+Name: wearable-display
+Version: 0.1.0
+Summary: Camera streaming utilities for the WearableDisplay prototype.
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: fastapi>=0.111.0
+Requires-Dist: opencv-python>=4.9.0
+Requires-Dist: uvicorn[standard]>=0.27.1
+Dynamic: license-file
+
+# WearableDisplay
+
+Turn on Continuity Camera on Iphone in settings>General>Airplay&Continuity> Continuity camera
+
+## HTTP Stream Server
+
+Expose the active camera feed over HTTP with:
+
+```bash
+uv run uvicorn stream_server:app --host 0.0.0.0 --port 8000
+```
+
+Visit `http://localhost:8000/stream` from another device on the network to view
+the MJPEG stream, or pass `?camera=` to point at a different preset/index/URL.
