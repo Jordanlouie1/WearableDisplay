@@ -1,0 +1,18 @@
+[project]
+name = "wearable-display"
+version = "0.1.0"
+description = "Camera streaming utilities for the WearableDisplay prototype."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "fastapi>=0.111.0",
+    "opencv-python>=4.9.0",
+    "uvicorn[standard]>=0.27.1",
+]
+
+[tool.setuptools]
+py-modules = ["camera_connector", "VideoStream"]
+
+[build-system]
+requires = ["setuptools>=65"]
+build-backend = "setuptools.build_meta"
