@@ -572,17 +572,11 @@ async def stream_camera(
 
     try:
         version, frame = await stream_buffer.wait_for_frame(-1, timeout=5.0)
-    except asyncio.TimeoutError:
-        try:
-            _, capture = _open_capture_with_fallback("local-default", allow_fallback=True)
-        except (KeyError, RuntimeError) as exc:
-            raise HTTPException(
-                status_code=503,
-                detail=f"No browser publisher and local camera unavailable ({exc}); ensure a camera is connected or start streaming from the UI.",
-            ) from exc
-
-        generator = _frame_stream(capture)
-        return StreamingResponse(generator, media_type=media_type)
+    except asyncio.TimeoutError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="No active browser publisher. Open '/' on a device and click 'Start streaming'.",
+        ) from exc
 
     generator = _remote_frame_generator(version, frame)
     return StreamingResponse(generator, media_type=media_type)

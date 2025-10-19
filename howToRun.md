@@ -65,8 +65,8 @@ Key workflow:
   push frames to the server over WebSocket.
 - Open `http://localhost:8000/stream` (from any device on the same network) to
   view the MJPEG stream sourced from the last publisher.
-- If no browser is pushing frames, `/stream` automatically falls back to the
-  preferred local camera preset (and its built-in fallback).
+- If no browser is pushing frames, `/stream` returns `503` until a publisher is
+  connected, ensuring all capture flows originate from the localhost UI.
 - Optional: append `?camera=<preset|index|url>` to `/stream` when you want the
   server itself to read from a local/remote OpenCV source instead of using a
   browser publisher. Known presets are listed at `/presets`.

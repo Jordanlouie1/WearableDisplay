@@ -18,5 +18,6 @@ plugging in a new one), and click **Start streaming**. Viewers can then load
 
 Set `DEFAULT_CAMERA_INDEX` when you need the server-side presets to default to
 something other than camera index `1`; the service falls back to the opposite
-index automatically when the preferred device is unavailable or when no browser
-is currently pushing frames.
+index automatically when the preferred device is unavailable. The `/stream`
+endpoint now serves frames only from browsers connected through the localhost
+UI, so keep the ingest tab open while streaming.
