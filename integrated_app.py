@@ -3,6 +3,8 @@ import cv2
 import math
 import mediapipe as mp
 from collections import deque
+from google import genai
+from google.genai import types
 
 class HandGestureRecognizer:
     def __init__(self, max_hands=1, detection_confidence=0.7, tracking_confidence=0.7):
@@ -70,6 +72,25 @@ class HandGestureRecognizer:
                     detected_gesture = "Pinch"
                     wristCoordinates = hand_lms.landmark[self.mp_hands.HandLandmark.WRIST]
                     print("Pinch")
+                    cv2.imwrite("captured_image.jpg", frame)
+                    print("Image saved as captured_image.jpg")
+
+                    with open('captured_image.jpg', 'rb') as f:
+                        image_bytes = f.read()
+                    API_KEY = "AIzaSyClOAYlN99H1TLxtTuaonffXbF4lgop5lk"
+                    client = genai.Client(api_key=API_KEY)
+                    response = client.models.generate_content(
+                        model='gemini-2.5-flash',
+                        contents=[
+                            types.Part.from_bytes(
+                                data=image_bytes,
+                                mime_type='image/jpeg',
+                            ),
+                            'Tell me what is the most significant object in the bounding box and describe it to me, limit it to two sentences, if you fail to describe it correctly I lose my job'
+                        ]
+                    )
+
+                    print(response.text)
                 elif peace:
                     detected_gesture = "Peace Sign"
                     print("Peace Sign")
@@ -161,9 +182,8 @@ class HandGestureRecognizer:
 
 def main():
     # Initialize camera
-    cap = cv2.VideoCapture(0)
-    cap.set(3, 640)  # Width
-    cap.set(4, 480)  # Height
+    cap = cv2.VideoCapture(1)
+
 
     # Check if camera is properly initialized
     if not cap.isOpened():
@@ -270,3 +290,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
