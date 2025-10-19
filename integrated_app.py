@@ -32,8 +32,8 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--weights",
-        default=os.getenv("YOLO_WEIGHTS", "yolo-Weights/yolov8n.pt"),
-        help="Path to YOLO weights (default: yolo-Weights/yolov8n.pt).",
+        default=os.getenv("YOLO_WEIGHTS", "yolov8n.pt"),
+        help="Path to YOLO weights (default: yolov8n.pt; downloads automatically if missing).",
     )
     parser.add_argument(
         "--mirror/--no-mirror",

@@ -194,8 +194,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--weights",
-        default="yolo-Weights/yolov8n.pt",
-        help="Path to the YOLO model weights.",
+        default="yolov8n.pt",
+        help="Path to the YOLO model weights (default downloads via Ultralytics).",
     )
     return parser.parse_args()
 

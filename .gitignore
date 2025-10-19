@@ -19,3 +19,9 @@ Thumbs.db
 # Output artifacts
 output.mp4
 
+# Build metadata
+wearable_display.egg-info/
+
+# Model artifacts
+yolo-Weights/
+*.pt
