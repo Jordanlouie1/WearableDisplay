@@ -1,5 +1,6 @@
 """
-Utility entry point to interact with camera streams using the CameraConnector.
+Utility entry point to interact with camera streams using the CameraConnector
+while running YOLO object detection on the incoming frames.
 
 This script can run locally or on a headless server, selecting the camera source
 through predefined presets, CLI arguments, or environment variables. It is
@@ -9,12 +10,98 @@ may publish camera streams that the backend needs to process hands-free.
 from __future__ import annotations
 
 import argparse
+import math
 import os
 from typing import Optional
 
 import cv2
+from ultralytics import YOLO
 
 from camera_connector import CameraConnector, CameraPreset, build_default_connector
+
+# Object categories supported by the YOLO v8n model.
+YOLO_CLASS_NAMES = [
+    "person",
+    "bicycle",
+    "car",
+    "motorbike",
+    "aeroplane",
+    "bus",
+    "train",
+    "truck",
+    "boat",
+    "traffic light",
+    "fire hydrant",
+    "stop sign",
+    "parking meter",
+    "bench",
+    "bird",
+    "cat",
+    "dog",
+    "horse",
+    "sheep",
+    "cow",
+    "elephant",
+    "bear",
+    "zebra",
+    "giraffe",
+    "backpack",
+    "umbrella",
+    "handbag",
+    "tie",
+    "suitcase",
+    "frisbee",
+    "skis",
+    "snowboard",
+    "sports ball",
+    "kite",
+    "baseball bat",
+    "baseball glove",
+    "skateboard",
+    "surfboard",
+    "tennis racket",
+    "bottle",
+    "wine glass",
+    "cup",
+    "fork",
+    "knife",
+    "spoon",
+    "bowl",
+    "banana",
+    "apple",
+    "sandwich",
+    "orange",
+    "broccoli",
+    "carrot",
+    "hot dog",
+    "pizza",
+    "donut",
+    "cake",
+    "chair",
+    "sofa",
+    "pottedplant",
+    "bed",
+    "diningtable",
+    "toilet",
+    "tvmonitor",
+    "laptop",
+    "mouse",
+    "remote",
+    "keyboard",
+    "cell phone",
+    "microwave",
+    "oven",
+    "toaster",
+    "sink",
+    "refrigerator",
+    "book",
+    "clock",
+    "vase",
+    "scissors",
+    "teddy bear",
+    "hair drier",
+    "toothbrush",
+]
 
 
 def _resolve_camera(connector: CameraConnector, selection: str) -> str:
@@ -46,7 +133,9 @@ def _resolve_camera(connector: CameraConnector, selection: str) -> str:
     return preset.key
 
 
-def _configure_writer(cam: cv2.VideoCapture, output_path: Optional[str]) -> Optional[cv2.VideoWriter]:
+def _configure_writer(
+    cam: cv2.VideoCapture, output_path: Optional[str]
+) -> Optional[cv2.VideoWriter]:
     """
     Create a VideoWriter when output_path is provided, matching the capture resolution.
     """
@@ -62,7 +151,10 @@ def _configure_writer(cam: cv2.VideoCapture, output_path: Optional[str]) -> Opti
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Open a camera stream from predefined presets for the ComeFriend project."
+        description=(
+            "Open a camera stream from predefined presets for the ComeFriend project "
+            "and run YOLO object detection."
+        )
     )
     parser.add_argument(
         "--camera",
@@ -100,7 +192,59 @@ def parse_args() -> argparse.Namespace:
         default=8,
         help="Maximum number of device indices to probe when --probe is used.",
     )
+    parser.add_argument(
+        "--weights",
+        default="yolo-Weights/yolov8n.pt",
+        help="Path to the YOLO model weights.",
+    )
     return parser.parse_args()
+
+
+def _draw_center_point(frame: cv2.Mat) -> tuple[int, int]:
+    """
+    Draw the center point on the provided frame and return its coordinates.
+    """
+    height, width = frame.shape[:2]
+    center_x, center_y = width // 2, height // 2
+    cv2.circle(frame, (center_x, center_y), 5, (0, 0, 255), -1)
+    return center_x, center_y
+
+
+def _process_detections(
+    frame: cv2.Mat,
+    center_x: int,
+    center_y: int,
+    results,
+) -> None:
+    """
+    Draw detection results and emit basic logging for any box covering the frame center.
+    """
+    for result in results:
+        boxes = result.boxes
+        for box in boxes:
+            x1, y1, x2, y2 = box.xyxy[0]
+            x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
+
+            if (x1 <= center_x <= x2) and (y1 <= center_y <= y2):
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 255), 3)
+
+                confidence = math.ceil((box.conf[0] * 100)) / 100
+                print("Confidence --->", confidence)
+
+                cls = int(box.cls[0])
+                if 0 <= cls < len(YOLO_CLASS_NAMES):
+                    label = YOLO_CLASS_NAMES[cls]
+                else:
+                    label = f"class_{cls}"
+                print("Class name -->", label)
+
+                org = (x1, y1)
+                font = cv2.FONT_HERSHEY_SIMPLEX
+                font_scale = 1
+                color = (255, 0, 0)
+                thickness = 2
+
+                cv2.putText(frame, label, org, font, font_scale, color, thickness)
 
 
 def main() -> None:
@@ -128,8 +272,14 @@ def main() -> None:
     preset_key = _resolve_camera(connector, selection)
 
     cam = connector.open(preset_key)
+    # Match the behaviour from the main branch implementation.
+    cam.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    cam.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+
     output_path = None if args.no_output else args.output
     writer = _configure_writer(cam, output_path)
+
+    model = YOLO(args.weights)
 
     try:
         while True:
@@ -137,6 +287,10 @@ def main() -> None:
             if not ret:
                 print("Failed to read frame; terminating capture loop.")
                 break
+
+            center_x, center_y = _draw_center_point(frame)
+            results = model(frame, stream=True)
+            _process_detections(frame, center_x, center_y, results)
 
             if writer:
                 writer.write(frame)
