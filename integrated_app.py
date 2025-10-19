@@ -36,7 +36,7 @@ class HandGestureRecognizer:
         # Pinch sequence timing variables
         self.pinch_sequence_active = False
         self.pinch_start_time = None
-        self.text_rendering_duration = 8.0  # 8 seconds
+        self.text_rendering_duration = 15.0  # 15 seconds
         self.llm_response = ""
         self.llm_processing = False
         self.current_phase = "normal"  # "normal", "processing", "text_rendering"
