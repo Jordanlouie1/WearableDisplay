@@ -1,8 +1,8 @@
+from ultralytics import YOLO
 import cv2
+import math
 import mediapipe as mp
-import math
 from collections import deque
-import math
 
 class HandGestureRecognizer:
     def __init__(self, max_hands=1, detection_confidence=0.7, tracking_confidence=0.7):
@@ -65,13 +65,10 @@ class HandGestureRecognizer:
                 # Detect closed hand
                 closed = self.detect_closed_hand(hand_lms)
 
-                # Detect swipes
-                #swipe = self.detect_swipe(hand_lms)
-                wristCoordinates = hand_lms.landmark[self.mp_hands.HandLandmark.WRIST]
                 # Update the current gesture
                 if pinch:
                     detected_gesture = "Pinch"
-                    normalPinch = wristCoordinates.y - 0.5
+                    wristCoordinates = hand_lms.landmark[self.mp_hands.HandLandmark.WRIST]
                     print("Pinch")
                 elif peace:
                     detected_gesture = "Peace Sign"
@@ -80,17 +77,16 @@ class HandGestureRecognizer:
                     detected_gesture = "Closed Hand"
                     print("Closed Hand")
 
-                #elif vulcan:
-                 #   detected_gesture = "Vulcan"
+                # Add wrist coordinates to gesture info
                 wristCoordinates = hand_lms.landmark[self.mp_hands.HandLandmark.WRIST]
-                detected_gesture = detected_gesture + f" ({wristCoordinates.x, wristCoordinates.y})"
+                detected_gesture = detected_gesture + f" ({wristCoordinates.x:.2f}, {wristCoordinates.y:.2f})"
+                
                 # Label the gesture
                 cv2.putText(frame, f"Gesture: {detected_gesture}", (10, 30),
-                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
         else:
             # Reset gesture tracking if no hands detected
             self.prev_hand_center = None
-
 
         self.current_gesture = detected_gesture
         return frame, detected_gesture
@@ -163,41 +159,114 @@ class HandGestureRecognizer:
         # Closed hand means all fingers are curled
         return index_curled and middle_curled and ring_curled and pinky_curled
 
-# Main function to run the gesture recognition
 def main():
-    # Initialize webcam
-    cap = cv2.VideoCapture(0) #Camera1 for external camera
+    # Initialize camera
+    cap = cv2.VideoCapture(0)
+    cap.set(3, 640)  # Width
+    cap.set(4, 480)  # Height
+
+    # Check if camera is properly initialized
+    if not cap.isOpened():
+        print("Error: Could not access camera. Please check your camera connection.")
+        return
+
+    # Initialize YOLO model
+    model = YOLO("yolo-Weights/yolov8n.pt")
 
     # Initialize gesture recognizer
     gesture_recognizer = HandGestureRecognizer()
 
+    # Object classes for YOLO
+    classNames = ["person", "bicycle", "car", "motorbike", "aeroplane", "bus", "train", "truck", "boat",
+                  "traffic light", "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat",
+                  "dog", "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella",
+                  "handbag", "tie", "suitcase", "frisbee", "skis", "snowboard", "sports ball", "kite", "baseball bat",
+                  "baseball glove", "skateboard", "surfboard", "tennis racket", "bottle", "wine glass", "cup",
+                  "fork", "knife", "spoon", "bowl", "banana", "apple", "sandwich", "orange", "broccoli",
+                  "carrot", "hot dog", "pizza", "donut", "cake", "chair", "sofa", "pottedplant", "bed",
+                  "diningtable", "toilet", "tvmonitor", "laptop", "mouse", "remote", "keyboard", "cell phone",
+                  "microwave", "oven", "toaster", "sink", "refrigerator", "book", "clock", "vase", "scissors",
+                  "teddy bear", "hair drier", "toothbrush"]
+
+    print("Integrated App Started!")
+    print("Features: YOLO Object Detection + Hand Gesture Recognition")
+    print("Press 'q' to quit")
+    print("Initializing camera...")
+
+    # Give camera time to initialize
+    import time
+    time.sleep(1)
+    
+    # Test camera by reading a frame
+    test_ret, test_frame = cap.read()
+    if not test_ret:
+        print("Error: Camera test failed. Please check your camera connection.")
+        cap.release()
+        return
+    else:
+        print("Camera test successful!")
+
     while cap.isOpened():
-        ret, frame = cap.read()
+        ret, img = cap.read()
         if not ret:
             print("Failed to grab frame")
             break
 
         # Flip the frame horizontally for a more intuitive mirror view
-        frame = cv2.flip(frame, 1)
+        img = cv2.flip(img, 1)
+        
+        # Get frame dimensions
+        height, width = img.shape[:2]
+        center_x, center_y = width // 2, height // 2
+        
+        # Draw center point
+        cv2.circle(img, (center_x, center_y), 5, (0, 0, 255), -1)
+        
+        # YOLO Object Detection
+        results = model(img, stream=True)
 
-        # Detect gestures
-        frame, gesture = gesture_recognizer.detect_gestures(frame)
+        for r in results:
+            boxes = r.boxes
+            if boxes is not None:
+                for box in boxes:
+                    x1, y1, x2, y2 = box.xyxy[0]
+                    x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
+
+                    # Check if object is in center of frame
+                    if (x1 <= center_x <= x2) and (y1 <= center_y <= y2):
+                        cv2.rectangle(img, (x1, y1), (x2, y2), (255, 0, 255), 3)
+
+                        confidence = math.ceil((box.conf[0]*100))/100
+                        print("Confidence --->", confidence)
+
+                        cls = int(box.cls[0])
+                        print("Class name -->", classNames[cls])
+
+                        org = [x1, y1]
+                        font = cv2.FONT_HERSHEY_SIMPLEX
+                        fontScale = 0.7
+                        color = (255, 0, 0)
+                        thickness = 2
+
+                        cv2.putText(img, classNames[cls], org, font, fontScale, color, thickness)
+
+        # Hand Gesture Recognition
+        img, gesture = gesture_recognizer.detect_gestures(img)
 
         # Display the frame
-        cv2.imshow('Hand Gesture Recognition', frame)
+        cv2.imshow('Integrated App - YOLO + Gestures', img)
 
         # Print the current detected gesture
         if gesture != "None":
             print(f"Detected gesture: {gesture}")
 
         # Break the loop when 'q' is pressed
-        if cv2.waitKey(1) & 0xFF == ord('q'):
+        if cv2.waitKey(1) == ord('q'):
             break
 
     # Release resources
     cap.release()
     cv2.destroyAllWindows()
-
 
 if __name__ == "__main__":
     main()
