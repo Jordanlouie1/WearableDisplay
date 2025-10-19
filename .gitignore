@@ -1,0 +1,27 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+uv.lock
+
+# Local configuration
+.env
+
+# OS clutter
+.DS_Store
+Thumbs.db
+
+# Output artifacts
+output.mp4
+
+# Build metadata
+wearable_display.egg-info/
+
+# Model artifacts
+yolo-Weights/
+*.pt
