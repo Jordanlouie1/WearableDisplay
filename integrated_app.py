@@ -392,8 +392,11 @@ class HandGestureRecognizer:
             (thumb_tip.y - index_tip.y) ** 2
         )
 
-        # Threshold for pinch gesture
-        return distance < 0.05
+        # Debug: Print distance to help tune threshold
+        print(f"Pinch distance: {distance:.3f}")
+        
+        # More sensitive threshold for pinch gesture (was 0.02, now 0.04)
+        return distance < 0.04
 
     def detect_peace_sign(self, landmarks):
         """
@@ -411,13 +414,14 @@ class HandGestureRecognizer:
         ring_pip = landmarks.landmark[self.mp_hands.HandLandmark.RING_FINGER_PIP]
         pinky_pip = landmarks.landmark[self.mp_hands.HandLandmark.PINKY_PIP]
 
-        # Check if index and middle fingers are extended
-        index_extended = index_tip.y < index_pip.y
-        middle_extended = middle_tip.y < middle_pip.y
+        # Check if index and middle fingers are extended (with tolerance for sensitivity)
+        tolerance = 0.02  # Add tolerance for more sensitive detection
+        index_extended = index_tip.y < (index_pip.y + tolerance)
+        middle_extended = middle_tip.y < (middle_pip.y + tolerance)
 
-        # Check if ring and pinky fingers are closed
-        ring_closed = ring_tip.y > ring_pip.y
-        pinky_closed = pinky_tip.y > pinky_pip.y
+        # Check if ring and pinky fingers are closed (with tolerance for sensitivity)
+        ring_closed = ring_tip.y > (ring_pip.y - tolerance)
+        pinky_closed = pinky_tip.y > (pinky_pip.y - tolerance)
 
         # Peace sign is when index and middle are extended while ring and pinky are closed
         return index_extended and middle_extended and (ring_closed or pinky_closed)
@@ -439,10 +443,12 @@ class HandGestureRecognizer:
         pinky_pip = landmarks.landmark[self.mp_hands.HandLandmark.PINKY_PIP]
 
         # Check if all fingertips are below their respective PIP joints (finger curled)
-        index_curled = index_tip.y > index_pip.y
-        middle_curled = middle_tip.y > middle_pip.y
-        ring_curled = ring_tip.y > ring_pip.y
-        pinky_curled = pinky_tip.y > pinky_pip.y
+        # Add tolerance for more sensitive detection
+        tolerance = 0.02
+        index_curled = index_tip.y > (index_pip.y - tolerance)
+        middle_curled = middle_tip.y > (middle_pip.y - tolerance)
+        ring_curled = ring_tip.y > (ring_pip.y - tolerance)
+        pinky_curled = pinky_tip.y > (pinky_pip.y - tolerance)
 
         # Closed hand means all fingers are curled
         return index_curled and middle_curled and ring_curled and pinky_curled
@@ -511,15 +517,15 @@ class HandGestureRecognizer:
             if len(lines) > 1:
                 lines = [line + '.' for line in lines[:-1]] + [lines[-1]]
             
-            # Display each line
+            # Display each line with smaller text
             y_offset = 80
             for i, line in enumerate(lines[:3]):  # Limit to 3 lines
-                cv2.putText(frame, line, (10, y_offset + i * 50),
-                            cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 3)
+                cv2.putText(frame, line, (10, y_offset + i * 40),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
             
-            # Show remaining time
+            # Show remaining time with smaller text
             cv2.putText(frame, f"Text Display: {remaining_time:.1f}s remaining", (10, 30),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 3)
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
         else:
             cv2.putText(frame, "No response available", (10, 60),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
