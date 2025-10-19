@@ -266,6 +266,10 @@ class HandGestureRecognizer:
         self.llm_response = ""
         self.llm_processing = False
         self.current_phase = "normal"  # "normal", "processing", "text_rendering"
+        
+        # Pinch detection stability
+        self.pinch_detection_count = 0
+        self.pinch_threshold_count = 3  # Require 3 consecutive detections
 
     def detect_gestures(self, frame):
         current_time = time.time()
@@ -342,21 +346,31 @@ class HandGestureRecognizer:
                     self.is_closed = closed
 
                     if pinch:
-                        detected_gesture = "Pinch"
-                        if not prev_pinch:
+                        self.pinch_detection_count += 1
+                        print(f"Pinch detected {self.pinch_detection_count}/{self.pinch_threshold_count}")
+                        
+                        # Only trigger LLM if pinch is sustained
+                        if self.pinch_detection_count >= self.pinch_threshold_count:
+                            detected_gesture = "Pinch"
                             wristCoordinates = hand_lms.landmark[self.mp_hands.HandLandmark.WRIST]
-                            print("Pinch detected - starting LLM processing")
-
+                            print("Sustained pinch detected - starting LLM processing")
+                            
                             # Start pinch sequence immediately with LLM processing
                             self.pinch_sequence_active = True
                             self.pinch_start_time = current_time
                             self.current_phase = "processing"
                             self.llm_processing = True
-                            self.llm_response = ""
-
+                            
                             # Process frame with LLM in background
-                            self._process_with_llm_async(frame.copy())
-                    elif peace:
+                            self._process_with_llm_async(frame)
+                            
+                            # Reset counter
+                            self.pinch_detection_count = 0
+                    else:
+                        # Reset pinch counter if no pinch detected
+                        self.pinch_detection_count = 0
+                        
+                    if peace:
                         detected_gesture = "Peace Sign"
                         if not prev_peace:
                             print("Peace Sign")
@@ -395,8 +409,8 @@ class HandGestureRecognizer:
         # Debug: Print distance to help tune threshold
         print(f"Pinch distance: {distance:.3f}")
         
-        # More sensitive threshold for pinch gesture (was 0.02, now 0.04)
-        return distance < 0.04
+        # Very strict threshold for pinch gesture to prevent false triggers
+        return distance < 0.025
 
     def detect_peace_sign(self, landmarks):
         """
@@ -606,7 +620,10 @@ def main() -> None:
 
         img, gesture = gesture_recognizer.detect_gestures(img)
 
-        cv2.imshow("Integrated App - YOLO + Gestures", img)
+        # Display the frame in fullscreen
+        cv2.namedWindow('Integrated App - YOLO + Gestures', cv2.WINDOW_NORMAL)
+        cv2.setWindowProperty('Integrated App - YOLO + Gestures', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+        cv2.imshow('Integrated App - YOLO + Gestures', img)
 
         if gesture != last_announced_gesture and gesture != "None":
             print(f"Detected gesture: {gesture}")
