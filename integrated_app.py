@@ -274,9 +274,10 @@ class HandGestureRecognizer:
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
 
 def main():
-    # Initialize camera
-    cap = cv2.VideoCapture(1)
-
+    # Initialize camera - same as VideoStream.py
+    cap = cv2.VideoCapture(0)
+    cap.set(3, 640)
+    cap.set(4, 480)
 
     # Check if camera is properly initialized
     if not cap.isOpened():
