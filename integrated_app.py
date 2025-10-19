@@ -2,16 +2,19 @@ from __future__ import annotations
 
 import argparse
 import os
-from typing import Iterable
+import threading
 import time
+from collections import deque
+from typing import Iterable
 
-from ultralytics import YOLO
 import cv2
 import math
 import mediapipe as mp
-from collections import deque
 from google import genai
 from google.genai import types
+from ultralytics import YOLO
+
+from Keys import API_KEY
 
 
 def _parse_args() -> argparse.Namespace:
@@ -43,8 +46,8 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--api-key",
-        default=os.getenv("GOOGLE_API_KEY"),
-        help="Gemini API key. Falls back to GOOGLE_API_KEY env when omitted.",
+        default=os.getenv("GOOGLE_API_KEY", API_KEY),
+        help="Gemini API key. Defaults to GOOGLE_API_KEY env or Keys.API_KEY when omitted.",
     )
     return parser.parse_args()
 
@@ -226,7 +229,13 @@ def _warm_up_capture(cap: cv2.VideoCapture, attempts: int = 10, delay: float = 0
 
 
 class HandGestureRecognizer:
-    def __init__(self, max_hands=1, detection_confidence=0.7, tracking_confidence=0.7):
+    def __init__(
+        self,
+        max_hands: int = 1,
+        detection_confidence: float = 0.7,
+        tracking_confidence: float = 0.7,
+        api_key: str | None = None,
+    ):
         # Initialize MediaPipe Hands
         self.mp_hands = mp.solutions.hands
         self.hands = self.mp_hands.Hands(
@@ -235,6 +244,7 @@ class HandGestureRecognizer:
             min_tracking_confidence=tracking_confidence
         )
         self.mp_draw = mp.solutions.drawing_utils
+        self.api_key = api_key or API_KEY
 
         # Store hand landmark history for gesture tracking
         self.landmark_history = deque(maxlen=10)
@@ -248,72 +258,123 @@ class HandGestureRecognizer:
         # Swipe detection variables
         self.swipe_threshold = 0.2  # Normalized threshold for swipe detection
         self.prev_hand_center = None
+        
+        # Pinch sequence timing variables
+        self.pinch_sequence_active = False
+        self.pinch_start_time = None
+        self.text_rendering_duration = 15.0  # 15 seconds
+        self.llm_response = ""
+        self.llm_processing = False
+        self.current_phase = "normal"  # "normal", "processing", "text_rendering"
 
     def detect_gestures(self, frame):
-        # Convert BGR to RGB
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        h, w, _ = frame.shape
+        current_time = time.time()
+        
+        # Handle pinch sequence timing
+        if self.pinch_sequence_active:
+            elapsed_time = current_time - self.pinch_start_time
+            
+            if self.current_phase == "processing":
+                # Still processing LLM in background
+                cv2.putText(frame, "Processing with LLM...", (10, 30),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
+                return frame, "Processing"
+            
+            elif self.current_phase == "text_rendering":
+                if elapsed_time >= self.text_rendering_duration:
+                    # End the pinch sequence
+                    self.pinch_sequence_active = False
+                    self.current_phase = "normal"
+                    print("Pinch sequence completed")
+                else:
+                    # Render LLM response text on frame
+                    remaining_time = self.text_rendering_duration - elapsed_time
+                    self._render_text_on_frame(frame, remaining_time)
+                    return frame, "Text Rendering"
+        
+        # Normal gesture detection (only if not in pinch sequence)
+        if not self.pinch_sequence_active:
+            # Convert BGR to RGB
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            h, w, _ = frame.shape
 
-        # Process the frame to detect hands
-        results = self.hands.process(frame_rgb)
+            # Process the frame to detect hands
+            results = self.hands.process(frame_rgb)
 
-        # Variables to store current detected gesture
-        detected_gesture = "None"
-        hand_landmarks = None
+            # Variables to store current detected gesture
+            detected_gesture = "None"
+            hand_landmarks = None
 
-        # Check if hand landmarks are detected
-        if results.multi_hand_landmarks:
-            for hand_lms in results.multi_hand_landmarks:
-                # Draw hand landmarks on the frame
-                self.mp_draw.draw_landmarks(
-                    frame, hand_lms, self.mp_hands.HAND_CONNECTIONS)
+            # Check if hand landmarks are detected
+            if results.multi_hand_landmarks:
+                for hand_lms in results.multi_hand_landmarks:
+                    # Draw hand landmarks on the frame
+                    self.mp_draw.draw_landmarks(
+                        frame, hand_lms, self.mp_hands.HAND_CONNECTIONS)
 
-                # Store the landmark positions
-                hand_landmarks = hand_lms
-                landmarks = []
-                for lm in hand_lms.landmark:
-                    landmarks.append((int(lm.x * w), int(lm.y * h)))
+                    # Store the landmark positions
+                    hand_landmarks = hand_lms
+                    landmarks = []
+                    for lm in hand_lms.landmark:
+                        landmarks.append((int(lm.x * w), int(lm.y * h)))
 
-                # Store landmarks history for tracking movement
-                self.landmark_history.append(landmarks)
+                    # Store landmarks history for tracking movement
+                    self.landmark_history.append(landmarks)
 
-                prev_pinch, prev_peace, prev_closed = (
-                    self.is_pinch,
-                    self.is_peace,
-                    self.is_closed,
-                )
+                    # Detect pinch gesture
+                    pinch = self.detect_pinch(hand_lms)
 
-                pinch = self.detect_pinch(hand_lms)
-                peace = self.detect_peace_sign(hand_lms)
-                closed = self.detect_closed_hand(hand_lms)
+                    # Detect peace sign
+                    peace = self.detect_peace_sign(hand_lms)
 
-                self.is_pinch = pinch
-                self.is_peace = peace
-                self.is_closed = closed
+                    # Detect closed hand
+                    closed = self.detect_closed_hand(hand_lms)
 
-                if pinch:
-                    detected_gesture = "Pinch"
-                    if not prev_pinch:
-                        print("Pinch")
-                elif peace:
-                    detected_gesture = "Peace Sign"
-                    if not prev_peace:
-                        print("Peace Sign")
-                elif closed:
-                    detected_gesture = "Closed Hand"
-                    if not prev_closed:
-                        print("Closed Hand")
+                    # Update the current gesture
+                    prev_pinch, prev_peace, prev_closed = (
+                        self.is_pinch,
+                        self.is_peace,
+                        self.is_closed,
+                    )
 
-                # Add wrist coordinates to gesture info
-                wristCoordinates = hand_lms.landmark[self.mp_hands.HandLandmark.WRIST]
-                detected_gesture = detected_gesture + f" ({wristCoordinates.x:.2f}, {wristCoordinates.y:.2f})"
-                
-                # Label the gesture
-                cv2.putText(frame, f"Gesture: {detected_gesture}", (10, 30),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
-        else:
-            # Reset gesture tracking if no hands detected
-            self.prev_hand_center = None
+                    self.is_pinch = pinch
+                    self.is_peace = peace
+                    self.is_closed = closed
+
+                    if pinch:
+                        detected_gesture = "Pinch"
+                        if not prev_pinch:
+                            wristCoordinates = hand_lms.landmark[self.mp_hands.HandLandmark.WRIST]
+                            print("Pinch detected - starting LLM processing")
+
+                            # Start pinch sequence immediately with LLM processing
+                            self.pinch_sequence_active = True
+                            self.pinch_start_time = current_time
+                            self.current_phase = "processing"
+                            self.llm_processing = True
+                            self.llm_response = ""
+
+                            # Process frame with LLM in background
+                            self._process_with_llm_async(frame.copy())
+                    elif peace:
+                        detected_gesture = "Peace Sign"
+                        if not prev_peace:
+                            print("Peace Sign")
+                    elif closed:
+                        detected_gesture = "Closed Hand"
+                        if not prev_closed:
+                            print("Closed Hand")
+
+                    # Add wrist coordinates to gesture info
+                    wristCoordinates = hand_lms.landmark[self.mp_hands.HandLandmark.WRIST]
+                    detected_gesture = detected_gesture + f" ({wristCoordinates.x:.2f}, {wristCoordinates.y:.2f})"
+                    
+                    # Label the gesture
+                    cv2.putText(frame, f"Gesture: {detected_gesture}", (10, 30),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+            else:
+                # Reset gesture tracking if no hands detected
+                self.prev_hand_center = None
 
         self.current_gesture = detected_gesture
         return frame, detected_gesture
@@ -385,20 +446,99 @@ class HandGestureRecognizer:
 
         # Closed hand means all fingers are curled
         return index_curled and middle_curled and ring_curled and pinky_curled
+    
+    def _process_with_llm_async(self, frame: cv2.Mat) -> None:
+        """Process the frame with LLM in background thread"""
+        if not self.api_key:
+            print("No API key configured; skipping LLM processing.")
+            self.llm_response = "LLM disabled (missing API key)."
+            self.llm_processing = False
+            self.current_phase = "text_rendering"
+            return
 
-def main():
+        frame_to_save = frame.copy()
+
+        def process_thread():
+            try:
+                # Save the current frame
+                cv2.imwrite("captured_image.jpg", frame_to_save)
+                print("Image saved as captured_image.jpg")
+
+                # Process with LLM
+                with open("captured_image.jpg", "rb") as f:
+                    image_bytes = f.read()
+                client = genai.Client(api_key=self.api_key)
+                response = client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=[
+                        types.Part.from_bytes(
+                            data=image_bytes,
+                            mime_type="image/jpeg",
+                        ),
+                        (
+                            "Tell me what is the most significant object in the bounding box and describe it to me, "
+                            "limit it to two sentences."
+                        ),
+                    ],
+                )
+
+                self.llm_response = response.text if response else ""
+                self.llm_processing = False
+                self.current_phase = "text_rendering"
+                print("LLM Response:", self.llm_response)
+                print("Starting text rendering phase...")
+                
+            except Exception as e:
+                print(f"Error processing with LLM: {e}")
+                self.llm_response = "Error processing image with LLM"
+                self.llm_processing = False
+                self.current_phase = "text_rendering"
+        
+        # Start processing in background thread
+        thread = threading.Thread(target=process_thread)
+        thread.daemon = True
+        thread.start()
+    
+    def _render_text_on_frame(self, frame, remaining_time):
+        """Render LLM response text on the frame during text rendering phase"""
+        if self.llm_processing:
+            # Still processing, show processing message
+            cv2.putText(frame, "Processing with LLM...", (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
+        elif self.llm_response:
+            # Split text into lines for better display
+            lines = self.llm_response.split('. ')
+            if len(lines) > 1:
+                lines = [line + '.' for line in lines[:-1]] + [lines[-1]]
+            
+            # Display each line
+            y_offset = 80
+            for i, line in enumerate(lines[:3]):  # Limit to 3 lines
+                cv2.putText(frame, line, (10, y_offset + i * 50),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 3)
+            
+            # Show remaining time
+            cv2.putText(frame, f"Text Display: {remaining_time:.1f}s remaining", (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 3)
+        else:
+            cv2.putText(frame, "No response available", (10, 60),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
+
+def main() -> None:
     args = _parse_args()
 
     candidates = _camera_candidates(args)
     cap, camera_source = _open_camera_with_fallback(candidates)
 
     if cap is None or camera_source is None:
-        print("Error: Unable to access any camera source. "
-              "Confirm the localhost stream is active or plug in a USB camera.")
+        print(
+            "Error: Unable to access any camera source. "
+            "Confirm the localhost stream is active or plug in a USB camera."
+        )
         return
 
     model = YOLO(args.weights)
-    gesture_recognizer = HandGestureRecognizer()
+    gesture_recognizer = HandGestureRecognizer(api_key=args.api_key)
     class_names = list(_class_names())
 
     print("Integrated App Started!")
@@ -409,16 +549,13 @@ def main():
     if args.mirror:
         print("Mirroring frames for display.")
 
-    api_key = args.api_key
-    if not api_key:
+    if not gesture_recognizer.api_key:
         print(
-            "Warning: Google API key not provided. Pinch snapshots will be saved"
-            " locally but Gemini responses will be skipped."
+            "Warning: Google API key not provided. Pinch snapshots will be saved "
+            "locally but Gemini responses will be skipped."
         )
 
-    client = genai.Client(api_key=api_key) if api_key else None
-
-    pinch_active = False
+    last_announced_gesture = None
 
     while cap.isOpened():
         ret, img = cap.read()
@@ -435,8 +572,8 @@ def main():
 
         results = model(img, stream=True)
 
-        for r in results:
-            boxes = getattr(r, "boxes", None)
+        for result in results:
+            boxes = getattr(result, "boxes", None)
             if boxes is None:
                 continue
             for box in boxes:
@@ -463,44 +600,19 @@ def main():
 
         img, gesture = gesture_recognizer.detect_gestures(img)
 
-        if gesture.startswith("Pinch"):
-            if client and not pinch_active:
-                _handle_pinch_event(img, client)
-            pinch_active = True
-        else:
-            pinch_active = False
-
         cv2.imshow("Integrated App - YOLO + Gestures", img)
 
-        if gesture != "None":
+        if gesture != last_announced_gesture and gesture != "None":
             print(f"Detected gesture: {gesture}")
+            last_announced_gesture = gesture
+        elif gesture == "None":
+            last_announced_gesture = "None"
 
         if cv2.waitKey(1) == ord("q"):
             break
 
     cap.release()
     cv2.destroyAllWindows()
-
-
-def _handle_pinch_event(frame: cv2.Mat, client: genai.Client) -> None:
-    cv2.imwrite("captured_image.jpg", frame)
-    print("Image saved as captured_image.jpg")
-
-    with open("captured_image.jpg", "rb") as file:
-        image_bytes = file.read()
-
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=[
-            types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"),
-            (
-                "Tell me what is the most significant object in the bounding box and"
-                " describe it to me, limit it to two sentences."
-            ),
-        ],
-    )
-
-    print(response.text if response else "No response received from Gemini.")
 
 if __name__ == "__main__":
     main()
