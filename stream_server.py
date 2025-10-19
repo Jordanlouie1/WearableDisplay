@@ -403,6 +403,70 @@ def _frame_stream(capture: cv2.VideoCapture) -> Generator[bytes, None, None]:
         capture.release()
 
 
+def _iter_local_candidates(preferred_key: Optional[str]) -> Iterable[str]:
+    seen = set()
+
+    def register(key: Optional[str]) -> Optional[str]:
+        if not key:
+            return None
+        if not connector.has_preset(key) or key in seen:
+            return None
+        preset = connector.get_preset(key)
+        if not isinstance(preset.source, int):
+            return None
+        seen.add(key)
+        return key
+
+    primary = register(preferred_key)
+    if primary:
+        yield primary
+
+    for key in ("local-default", "local-fallback"):
+        candidate = register(key)
+        if candidate:
+            yield candidate
+
+    for preset in connector.list_presets():
+        if preset.key in seen:
+            continue
+        if isinstance(preset.source, int):
+            seen.add(preset.key)
+            yield preset.key
+
+
+def _open_capture_with_fallback(preset_key: str, allow_fallback: bool) -> Tuple[str, cv2.VideoCapture]:
+    primary = connector.get_preset(preset_key)
+    candidates = []
+    seen = set()
+
+    def append(key: str) -> None:
+        if key in seen or not connector.has_preset(key):
+            return
+        seen.add(key)
+        candidates.append(key)
+
+    if allow_fallback and isinstance(primary.source, int):
+        for key in _iter_local_candidates(preset_key):
+            append(key)
+    else:
+        append(preset_key)
+
+    if not candidates:
+        append(preset_key)
+
+    errors = []
+    for key in candidates:
+        try:
+            capture = connector.open(key)
+            return key, capture
+        except RuntimeError as exc:
+            preset = connector.get_preset(key)
+            errors.append(f"{key} (source={preset.source}): {exc}")
+            continue
+
+    raise RuntimeError("; ".join(errors) if errors else f"Unable to open camera preset '{preset_key}'.")
+
+
 async def _remote_frame_generator(initial_version: int, initial_frame: bytes) -> AsyncGenerator[bytes, None]:
     version = initial_version
     frame = initial_frame
@@ -497,7 +561,7 @@ async def stream_camera(
     if should_use_local_camera:
         preset_key = _select_preset(camera)
         try:
-            capture = connector.open(preset_key)
+            _, capture = _open_capture_with_fallback(preset_key, allow_fallback=not bool(camera))
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except RuntimeError as exc:
@@ -508,11 +572,17 @@ async def stream_camera(
 
     try:
         version, frame = await stream_buffer.wait_for_frame(-1, timeout=5.0)
-    except asyncio.TimeoutError as exc:
-        raise HTTPException(
-            status_code=503,
-            detail="No active browser publisher. Open '/' on a device and click 'Start streaming'.",
-        ) from exc
+    except asyncio.TimeoutError:
+        try:
+            _, capture = _open_capture_with_fallback("local-default", allow_fallback=True)
+        except (KeyError, RuntimeError) as exc:
+            raise HTTPException(
+                status_code=503,
+                detail=f"No browser publisher and local camera unavailable ({exc}); ensure a camera is connected or start streaming from the UI.",
+            ) from exc
+
+        generator = _frame_stream(capture)
+        return StreamingResponse(generator, media_type=media_type)
 
     generator = _remote_frame_generator(version, frame)
     return StreamingResponse(generator, media_type=media_type)

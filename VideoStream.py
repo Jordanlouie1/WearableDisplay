@@ -70,7 +70,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--output",
-        help="Optional path to save the captured stream (mp4).",
+        default="output.mp4",
+        help="Path to save the captured stream (mp4). Use --no-output to disable recording.",
     )
     parser.add_argument(
         "--display",
@@ -87,6 +88,11 @@ def parse_args() -> argparse.Namespace:
         "--probe",
         action="store_true",
         help="Probe for local camera indices and exit.",
+    )
+    parser.add_argument(
+        "--no-output",
+        action="store_true",
+        help="Disable writing the captured stream to disk.",
     )
     parser.add_argument(
         "--max-probe",
@@ -122,7 +128,8 @@ def main() -> None:
     preset_key = _resolve_camera(connector, selection)
 
     cam = connector.open(preset_key)
-    writer = _configure_writer(cam, args.output)
+    output_path = None if args.no_output else args.output
+    writer = _configure_writer(cam, output_path)
 
     try:
         while True:

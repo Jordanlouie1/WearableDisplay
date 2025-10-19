@@ -65,6 +65,8 @@ Key workflow:
   push frames to the server over WebSocket.
 - Open `http://localhost:8000/stream` (from any device on the same network) to
   view the MJPEG stream sourced from the last publisher.
+- If no browser is pushing frames, `/stream` automatically falls back to the
+  preferred local camera preset (and its built-in fallback).
 - Optional: append `?camera=<preset|index|url>` to `/stream` when you want the
   server itself to read from a local/remote OpenCV source instead of using a
   browser publisher. Known presets are listed at `/presets`.
@@ -86,7 +88,8 @@ Key options:
 - `--list-presets` – Print the known camera presets and exit.
 - `--probe` (with optional `--max-probe N`) – Check which local camera indices are available.
 - `--camera <preset|index|url>` – Force a specific preset, device index, or remote stream URL.
-- `--output path/to/file.mp4` – Record the stream to an MP4 file at 20 FPS.
+- `--output path/to/file.mp4` – Record the stream to an MP4 file at 20 FPS (defaults to `output.mp4`).
+- `--no-output` – Disable video recording entirely.
 - `--display` / `--no-display` – Show (or suppress) a window preview of the frames. Default is `--no-display` for headless environments.
 
 Example: show a preview and record to disk:
@@ -99,6 +102,7 @@ uv run python VideoStream.py --display --output captures/session.mp4
 
 - `CAMERA_PRESET` – Set a preset key before launching to select a predefined camera.
 - `CAMERA_SOURCE` – Override the capture source entirely. Use an integer (e.g., `1`) for a local device or a URL for a remote stream. When set, `VideoStream.py` automatically creates an `env-override` preset.
+- `DEFAULT_CAMERA_INDEX` – Preferred local camera index for `local-default` (defaults to `1`). The connector automatically adds `local-fallback` to try the opposite index when the preferred device is unavailable.
 
 Examples:
 

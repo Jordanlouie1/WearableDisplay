@@ -137,17 +137,32 @@ def build_default_connector() -> CameraConnector:
     """
     Helper that initialises a connector with sensible defaults.
 
-    The default preset prefer an overridden `CAMERA_SOURCE` environment variable:
+    The default preset prefers the `DEFAULT_CAMERA_INDEX` (defaults to 1) and keeps
+    a fallback entry that points to the opposite common index. An overridden
+    `CAMERA_SOURCE` environment variable takes precedence:
     - If `CAMERA_SOURCE` is an integer, it is treated as a local device index.
     - Otherwise, it is used as a URL/stream path for remote clients.
     """
+    try:
+        default_index = int(os.getenv("DEFAULT_CAMERA_INDEX", "1"))
+    except ValueError:
+        default_index = 1
     presets = [
         CameraPreset(
             key="local-default",
-            source=0,
-            description="First available local camera device."
+            source=default_index,
+            description=f"Preferred local camera device (index {default_index})."
         ),
     ]
+
+    fallback_index = 0 if default_index != 0 else 1
+    presets.append(
+        CameraPreset(
+            key="local-fallback",
+            source=fallback_index,
+            description=f"Secondary local camera device (index {fallback_index}).",
+        )
+    )
 
     env_source = os.getenv("CAMERA_SOURCE")
     if env_source:
