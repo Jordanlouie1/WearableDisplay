@@ -1,3 +1,4 @@
 opencv-python
 ultralytics
 mediapipe
+google-gen a
